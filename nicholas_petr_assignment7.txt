@@ -1,0 +1,69 @@
+//Part A: MongoDB
+
+
+//1. Return total number of customers living in California
+//Assumptions: California is within the District attribute and is spelled 'California' 
+db.customers.find({
+    "District": "California"
+}
+).count()
+
+
+//2. List all movies that are rated NC-17.  Return the title and the rating, sorted alphabetically by title. 
+//Assumptions: NC-17 is within the Rating attribute and is spelled 'NC-17' 
+db.films.find({
+    "Rating": "NC-17"
+},
+    {
+        "Title": 1,
+        "Rating": 1}
+).sort({'Title': 1})
+
+//3. List the movie titles and the count of actors in each movie, sorted alphabetically by title.
+db.films.aggregate({ 
+    $project: {
+        "Title": 1,
+        countActors: {$size: "$Actors"}
+    }},
+    {$sort: {"Title": 1}}
+)
+
+//4. List the count of movies by category.  Return the category and the count, sorted by the count per category descending.
+db.films.aggregate(
+    [
+        { $group: { _id: "$Category", "Count Films": { $sum: 1 } } },
+    ]
+).sort({'Count Films': -1})
+
+//5. List the top 2 movies with movie length greater than 25mins or which has commentaries as special features.  Return the movie title, length, and special features.
+db.films.find({
+    $or: [{Length: {$gt: 25}}, {"Special Features": mb.regex.contains("Commentaries")}]
+}
+).sort({"Length" :-1}).limit(2)
+
+//Part B: Neo4j
+
+//1. Find all producers that produced the movie When Harry Met Sally. 
+MATCH (cloudAtlas {title: "When Harry Met Sally"})<-[:PRODUCED]-(producers) RETURN DISTINCT producers.name
+
+//2. Find directors who have directed more than 2 movies.  Return the name of the director and the count of movies they directed, ordered by movie count in descending order.
+MATCH (p:Person)-[:DIRECTED]->(m:Movie)
+WITH p, count(m) AS NumMovies, collect(m.title) AS Movies
+WHERE NumMovies > 2
+RETURN DISTINCT p.name, NumMovies
+ORDER BY NumMovies DESC
+
+//3. Find the actors who acted in 5+ movies, and the movies in which they acted.  Return the name of the actor, and the title of the films, ordered by the number of films acted per actor in descending order.
+MATCH (p:Person)-[:ACTED_IN]->(m:Movie)
+WITH p, count(m) AS NumMovies, collect(m.title) AS Movies
+WHERE NumMovies>=5
+RETURN DISTINCT p.name, NumMovies, Movies
+ORDER BY NumMovies DESC
+
+//4. Find the people who were the producer, writer, AND director (same person held all 3 roles) at the same time on a film. Return the names of the people and the titles of the films.
+MATCH (a:Person)-[:PRODUCED]->(m:Movie)<-[:DIRECTED]->(a:Person)-[:WROTE]->(m:Movie)
+RETURN DISTINCT a.name, m.title;
+
+//5. Find all the actors that are exactly 3 degrees away from Tom Hanks.  
+MATCH (hanks:Person {name:"Tom Hanks"})-[:ACTED_IN*6]-(hollywood)
+RETURN DISTINCT hollywood.name AS Actor

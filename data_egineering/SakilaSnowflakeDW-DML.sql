@@ -3,8 +3,6 @@
 **     DATA ENGINEERING PLATFORMS (MSCA 31012)
 ** File:   Sakila Snowflake DDL - Assignment 5
 ** Desc:   ETL/DML for the Sakila Snowflake Dimensional model
-** Auth:   Shreenidhi Bharadwaj, Ashish Pujari, Audrey Salerno
-** Date:   04/08/2018, Last updated 02/09/2021
 ************************************************/
 
 ---------------------------------------

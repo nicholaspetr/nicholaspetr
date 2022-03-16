@@ -3,8 +3,7 @@
 **     DATA ENGINEERING PLATFORMS (MSCA 31012)
 ** File:   Sakila Snowflake DDL - Assignment 5
 ** Desc:   Creating the Sakila Snowflake Dimensional model
-** Auth:   Shreenidhi Bharadwaj, Ashish Pujari, Audrey Salerno
-** Date:   04/08/2018, Last updated 02/09/2021
+** Auth:   Nicholas Petr
 ************************************************/
 
 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0;

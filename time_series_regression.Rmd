@@ -1,0 +1,156 @@
+---
+title: "Assignment 2 - Time Series Regression - Nicholas Petr"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+### Import Required Packages
+
+```{r}
+# Import required packages
+library(tseries)
+library(lubridate)
+library(dplyr)
+library(DataCombine)
+library(car)
+```
+
+### Load Data 
+
+```{r}
+df <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week2_TS_stationary_holtWinters_boxCox/TS regression - data_akbilgic.csv")
+```
+## Questions
+### 1. Determine if all the TS are stationary
+
+1.1 Qualitatively 
+
+```{r}
+acf(df$ISE) # ISE is stationary 
+
+acf(df$SP) # SP is stationary 
+
+acf(df$DAX) # DAX is stationary 
+
+acf(df$FTSE) # FTSE is stationary 
+
+acf(df$NIKKEI) # NIKKEI is stationary 
+
+acf(df$BOVESPA) # BOVESPA is stationary 
+```
+
+### 1.2 Quantitatively.
+
+Per Lecture 1, I am making the assumption that a 95% significance level (p-value < 0.05) is the accepted threshold to reject H0. 
+ADF Test: HO = Non-Stationary TS (Delta = 0). H1 = Stationary TS (Delta != 0)
+KPSS: H0 = Stationary. H1: Data is Non-Stationary
+
+```{r}
+#ISE: Stationary 
+adf.test(df$ISE)# detects trend stationarity
+kpss.test(df$ISE)# need to explicitly mention trend stationarity
+
+#SP: Stationary 
+adf.test(df$SP)
+kpss.test(df$SP)
+
+#DAX: Stationary 
+adf.test(df$DAX)
+kpss.test(df$DAX)
+
+#FTSE: Stationary 
+adf.test(df$FTSE)
+kpss.test(df$FTSE)
+
+#NIKKEI: Stationary 
+adf.test(df$NIKKEI)
+kpss.test(df$NIKKEI)
+
+#BOVESPA: Stationary 
+adf.test(df$BOVESPA)
+kpss.test(df$BOVESPA)
+```
+### 2. Split the data into train and test, keeping only the last 10 rows for test (from date 9-Feb-11).
+
+
+```{r}
+df$date1 = parse_date_time2(df$date, orders = "dmy") # convert to posixct
+test = subset(df, date1 >= "2011-02-08") # split into test/train datasets 
+dim(test)
+train = subset(df, date1 <= "2011-02-08")
+dim(train)
+```
+### 3. Linearly regress ISE against the remaining 5 stock index returns - determine which coefficients are equal or better than 0.02 (*) level of significance?
+
+### We can see that DAX, FTSE, and NIKKEI have coefficients equal or better than 0.02 (*) level of significance. SP and BOVESPA do not 
+```{r}
+# Linearly regress ISE against the remaining 5 stock index returns
+ISE_lm = lm(ISE ~ SP + DAX + FTSE + NIKKEI + BOVESPA, data=train)
+
+# determine which coefficients are equal or better than 0.02 (*) level of significance?
+summary(ISE_lm) # DAX, FTSE, and NIKKEI have coefficients equal or better than 0.02 (*) level of significance. SP and BOVESPA do not
+```
+
+### 4. For the non-significant coefficients, continue to lag by 1 day until all coefficients are better than 0.02 (*) level of significance.
+
+### How many lags are needed for each independent variable?
+### ANSWER: SP requires -2 lags to get below 0.02 level of significance. BOVESPA requires -1 lags to get below 0.02 level of significance.
+
+```{r}
+# Lag SP and BOVESPA by one time unit until coefficients reach 0.02 level of significance
+train_lag <- slide(data = train, Var = 'SP',
+                   NewVar = 'SPLag', slideBy = -2)
+train_lag <- slide(data = train_lag, Var = 'BOVESPA',
+                   NewVar = 'BOVESPALag', slideBy = -1)
+
+# Run new lm using Lag variables for SP and BOVESPA
+ISE_lag_lm = lm(ISE ~ SPLag + DAX + FTSE + NIKKEI + BOVESPALag, data=train_lag)
+summary(ISE_lag_lm)
+```
+
+### 5. Find correlations between ISE and each independent variable. Sum the square of the correlations. How does it compare to R-squared from #4?
+
+### How does it compare to R-squared from #4?
+### ANSWER: The R-Squared in #4 (0.5159921) is much less than the sum of square of the correlations (1.374691)
+
+```{r}
+# Find correlations between ISE and each independent variable
+ISE_cor = cor(train[, c('ISE', 'SP', 'DAX', 'FTSE', 'NIKKEI', 'BOVESPA')])^2
+# Get the sum of squared correlations for variables correlated with ISE 
+sum(0.2019759 + 0.3982557 + 0.4205850 + 0.1537869 + 0.2000873) # Answer: 1.374691
+# Compare with R-Squared output from lm output
+summary(ISE_lag_lm)$r.squared # Answer: 0.5159921
+```
+
+### 6. Concept question 1 - why do you think the R-squared in #4 is so much less than the sum of square of the correlations?
+
+ANSWER: The reason R-Squared is so much lower than the sum of square of the correlations is because R-Squared is calculated via 1- (SSR/SST), while the sum of square of the correlations is just SST. R-Squared may also be lower generally due to the presence of multicollinearity. Looking at VIF levels below, DAX and FTSE have VIF levels above 4.0, which indicates high multicollinearity. This would impact the R-Squared score.
+
+```{r}
+vif(ISE_lag_lm)
+```
+
+### 7. Take the test dataset - perform the same lags from #4 and call predict() function using the lm regression object from #4. Why do you need to use the lm function object from #4?
+
+Why do you need to use the lm function object from #4?
+ANSWER: The lm function object from #4 has the same lag components included for SP and BOVESPA, and is run on the training dataset. We are simply applying our predictive model for the test dataset here. 
+```{r}
+# Take the test dataset - perform the same lags from #4
+test_lag <- slide(data = test, Var = 'SP',
+                   NewVar = 'SPLag', slideBy = -2)
+test_lag <- slide(data = test_lag, Var = 'BOVESPA',
+                   NewVar = 'BOVESPALag', slideBy = -1)
+
+# Call predict() function using the lm regression object from #4
+test_predict = predict(ISE_lag_lm,newdata = test_lag)
+test_predict
+```
+
+### 8. Concept question 2 - what do you find in #1 and why?
+
+ANSWER: We find that all Stock Exchange variables are stationary. Qualitatively, we see lag rates for each stock exchange variable die down very quickly. Quantitatively, we can reject the null hypothesis (Delta = 0) in the ADF tests for all stock exchange variables. We cannot reject the null hypothesis (Stationary) for all KPSS tests.   

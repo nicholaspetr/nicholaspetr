@@ -1,0 +1,244 @@
+---
+title: "Assignment 5 - Gas Furnace  - Nicholas Petr"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+### Import Required Packages
+
+```{r}
+# Import Required packages 
+library(forecast)
+library(tseries)
+library(lubridate)
+library(lmtest)
+library(TSA)
+library(arfima)
+library(car)
+```
+
+### Load Data
+
+```{r}
+df <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week5_eda_cv_bootstrap_ML/Gas Furnace Dataset.csv")
+head(df)
+```
+
+## Questions
+
+## 1. Use linear regression model - plot the ACF - what can you conclude ? 
+
+### Conclusion: Based on the acf plot, it looks to be Non-stationary data, but could be a situation b/t stationary (d=0) and Non-Stationary (d=1), which would call for ARFIMA. We will do some additional analysis to determine the optimal model type. 
+```{r}
+model1 = lm(Outlet.gas.CO2.percentage~Input.gas.rate, data = df)
+acf(model1$residuals)
+# Extract residuals for use in additional models
+m1residuals<-model1$residuals
+```
+
+### Incorporate arima.innovation function for questions 2-7
+```{r}
+arma.innovation <- function(x, arma.model, ar.truncation=10) {
+  p <- arma.model$arma[1]
+  q <- arma.model$arma[2]
+  ar.coef <- arma.model$coef[seq_len(p)]
+  ma.coef <- arma.model$coef[p + seq_len(q)]
+  if (q == 0) {
+    infinite.ar.coef <- ar.coef
+  } else {
+    infinite.ar.coef <- -ARMAtoMA(-ma.coef, -ar.coef, ar.truncation)
+  }
+  return(as.vector(filter(x, c(1, -infinite.ar.coef), side=1)))
+}
+```
+
+### 2 Use ARIMA (0,0,1) model for the residuals. Adjust the Input gas rate and Output CO2 % with the MA coefficient.Combine with the linear regression model. Plot the residuals.
+```{r}
+# 2. Use ARIMA (0,0,1) model for the residuals. 
+arima2 <- Arima(m1residuals, order=c(0, 0, 1), include.mean = FALSE)
+# Adjust the Input gas rate and Output CO2 % with the MA coefficient.
+m2Input  <- arma.innovation(df$Input.gas.rate, arima2)
+m2Output <- arma.innovation(df$Outlet.gas.CO2.percentage, arima2)
+# Combine with the linear regression model. Plot the residuals.
+model2 <- lm(m2Output ~ m2Input)
+acf(model2$residuals)
+plot(model2$residuals, type='l')
+```
+
+### 3 Use ARIMA (1,0,0) model for the residuals. Adjust the Input gas rate and Output CO2 % with the AR coefficient.Combine with the linear regression model. Plot the residuals. 
+```{r}
+arima3 <- Arima(m1residuals, order=c(1, 0, 0), include.mean = FALSE)
+# Adjust the Input gas rate and Output CO2 % with the AR coefficient.
+m3Input  <- arma.innovation(df$Input.gas.rate, arima3)
+m3Output <- arma.innovation(df$Outlet.gas.CO2.percentage, arima3)
+# Combine with the linear regression model. Plot the residuals.
+model3 <- lm(m3Output ~ m3Input)
+acf(model3$residuals)
+plot(model3$residuals, type='l')
+```
+
+### 4 Use ARIMA (0,0,2) model for the residuals. Adjust the Input gas rate and Output CO2 % with the MA coefficient.Combine with the linear regression model. Plot the residuals. 
+```{r}
+arima4 <- Arima(m1residuals, order=c(0, 0, 2), include.mean = FALSE)
+# Adjust the Input gas rate and Output CO2 % with the MA coefficient.
+m4Input  <- arma.innovation(df$Input.gas.rate, arima4)
+m4Output <- arma.innovation(df$Outlet.gas.CO2.percentage, arima4)
+# Combine with the linear regression model. Plot the residuals.
+model4 <- lm(m4Output ~ m4Input)
+acf(model4$residuals)
+plot(model4$residuals, type='l')
+```
+
+### 5 Use ARIMA (2,0,0) model for the residuals. Adjust the Input gas rate and Output CO2 % with the AR coefficient.Combine with the linear regression model. Plot the residuals.
+```{r}
+arima5 <- Arima(m1residuals, order=c(2, 0, 0), include.mean = FALSE)
+# Adjust the Input gas rate and Output CO2 % with the AR coefficient.
+m5Input  <- arma.innovation(df$Input.gas.rate, arima5)
+m5Output <- arma.innovation(df$Outlet.gas.CO2.percentage, arima5)
+# Combine with the linear regression model. Plot the residuals.
+model5 <- lm(m5Output ~ m5Input)
+acf(model5$residuals)
+plot(model5$residuals, type='l')
+```
+
+### 6 Use ARIMA (2,0,2) model for the residuals. Adjust the Input gas rate and Output CO2 % with the MA and AR coefficients.Combine with the linear regression model. Plot the residuals.
+```{r}
+# 6. Use ARIMA (2,0,2) model for the residuals. 
+arima6 <- Arima(m1residuals, order=c(2, 0, 2), include.mean = FALSE)
+# Adjust the Input gas rate and Output CO2 % with the AR and MA coefficients.
+m6Input  <- arma.innovation(df$Input.gas.rate, arima6)
+m6Output <- arma.innovation(df$Outlet.gas.CO2.percentage, arima6)
+# Combine with the linear regression model. Plot the residuals.
+model6 <- lm(m6Output ~ m6Input)
+acf(model6$residuals)
+plot(model6$residuals, type='l')
+```
+
+### 7 Use fractional ARIMA model (aka ARFIMA) for the output gas CO2% - plot the residuals, acf and pacf plots of the model. 
+```{r}
+d <- fracdiff::fracdiff(df$Outlet.gas.CO2.percentage) #get the fractional d
+d # We see that d is 0.49 (right b/t 0 and 1). This means we need a model for cases b/t stationary (d=0) and Non-Stationary (d=1) process, which is ARFIMA
+st <- fracdiff::diffseries(df$Outlet.gas.CO2.percentage,d$d) # do the fractional diff
+acf(st, lag=40)
+arima7 <- auto.arima(st) 
+# plot the residuals, acf and pacf plots of the model.
+layout(matrix(c(1,1,2,3), 2, 2, byrow = TRUE))
+plot(arima7$residuals, main = "Residuals")
+acf(arima7$residuals, main = "ACF")
+pacf(arima7$residuals, main = "PACF")
+```
+
+## 8.1 Perform  Summaries,  Durbin-Watson and Box-Ljung tests for each model
+
+### MA 1: ARIMA (0,0,1)
+```{r}
+# MA 1: ARIMA (0,0,1)
+summary(arima2)
+durbinWatsonTest(model2$residuals)
+Box.test(model2$residuals,type = "Ljung")
+```
+
+### AR 1: ARIMA (1,0,0)
+```{r}
+# AR 1: ARIMA (1,0,0)
+summary(arima3)
+durbinWatsonTest(model3$residuals)
+Box.test(model3$residuals,type = "Ljung")
+```
+
+### MA 2: ARIMA (0,0,2)
+```{r}
+# MA 2: ARIMA (0,0,2)
+summary(arima4)
+durbinWatsonTest(model4$residuals)
+Box.test(model4$residuals,type = "Ljung")
+```
+
+### AR 2: ARIMA (2,0,0)
+```{r}
+# AR 2: ARIMA (2,0,0)
+summary(arima5)
+durbinWatsonTest(model5$residuals)
+Box.test(model5$residuals,type = "Ljung")
+```
+
+### AR and MA: ARIMA (2,0,2)
+```{r}
+# AR and MA: ARIMA (2,0,2)
+summary(arima6)
+durbinWatsonTest(model6$residuals)
+Box.test(model6$residuals,type = "Ljung")
+```
+
+### ARFIMA 
+```{r}
+# ARFIMA 
+summary(arima7)
+durbinWatsonTest(lm(residuals(arima7)~1,alternative = 'two.sided'))
+Box.test(arima7$residuals,type = "Ljung")
+```
+
+### 8.2 Build table to compare AICs, BICs and p-vaules for each test across the ARIMA and ARFIMA models.
+```{r}
+aic_vals = dplyr::bind_rows("Metric"="AIC", "MA 1"=arima2$aic, "AR 1"=arima3$aic, "MA 2"=arima4$aic, "AR 2"=arima5$aic, "AR and MA"=arima6$aic, "ARFIMA"=arima7$aic)
+bic_vals = dplyr::bind_rows("Metric"="BIC", "MA 1"=arima2$bic, "AR 1"=arima3$bic, "MA 2"=arima4$bic, "AR 2"=arima5$bic, "AR and MA"=arima6$bic, "ARFIMA"=arima7$bic)
+p_vals = dplyr::bind_rows("Metric"="p-val", "MA 1"="< 2.2e-16", "AR 1"="< 2.2e-16", "MA 2"="< 2.2e-16", "AR 2"="< 2.2e-16", "AR and MA"='3.084e-05', "ARFIMA"='0.9854')
+model_analysis = rbind(aic_vals,bic_vals,p_vals)
+model_analysis
+```
+
+### 9. Based on ACF plots and test results, which ARIMA model gives the best result in terms of residuals being close to white noise ?
+Looking at the ACF plots, the ARFIMA output appears to have the closest similarity to variables that are independent and identically distributed with a mean of zero, giving it the best result.Looking at the test results, the ARFIMA model also outputs the lowest AIC and BIC values, giving it the best output again. After looking at the associated d value via fracdiff, this is not surprising. ARFIMA is used for cases b/t stationary (d=0) and Non-Stationary (d=1) process. With d at 0.49, this is a perfect example use case for ARFIMA.
+
+
+### 10.1 Bootstrap - bootstrap residual.ols with n=500 (use the bld.mbb.bootstrap() API). Use the bootstrap samples to estimate 500 ARIMA(1,0,1) models using the Arima() API. Use the 500 estimates for AR and 500 estimates for MA coefficients
+```{r}
+bsResid <- bld.mbb.bootstrap(m1residuals, 500)
+bsDf <- as.data.frame(bsResid)
+
+ArimaBs<-list()
+for (i in 1:500) {
+  ArimaBs[[i]]<-Arima(bsDf[,i],order = c(1,0,1))
+}
+
+ARC<-array(NA,dim = c(500,1))
+MAC<-array(NA,dim = c(500,1))
+
+for (i in 1:500) {
+  ARC[i,1]<-ArimaBs[[i]]$coef[1]
+  MAC[i,1]<-ArimaBs[[i]]$coef[2]
+}
+```
+
+## 10.2 Plot the coefficient distributions (one for AR and one for MA)- what type of distribution are they close to? Why?
+As you can see in the plot, the coefficient distribution for both the MA and AR coefficients look to be normally (Gaussian) distributed. Because we are using lag variables for inputs, this would make sense.
+```{r}
+layout(matrix(c(1,1,2,3), 2, 2, byrow = TRUE))
+# Bootstrap Plot 
+matplot(bsDf, type="l", main = "Bootstrap Plot")
+# AR Plot
+hist(ARC,prob=T)
+lines(density(ARC), main = "AR Coefficient Plot")
+# MA Plot
+hist(MAC,prob=T)
+lines(density(MAC), main = "MA Coefficient Plot")
+```
+
+## 10.3 Calculate the 95% confidence interval for the coefficient
+
+### AR Coefficient
+```{r}
+### AR Coefficient
+mean(ARC)-1.96*(sd(ARC)/sqrt(500));mean(ARC)+1.96*(sd(ARC)/sqrt(500))
+```
+
+### MA Coefficient
+```{r}
+### MA Coefficient
+mean(MAC)-1.96*(sd(MAC)/sqrt(500));mean(MAC)+1.96*(sd(MAC)/sqrt(500))
+```

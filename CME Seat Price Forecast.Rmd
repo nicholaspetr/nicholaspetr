@@ -1,0 +1,389 @@
+---
+title: "Assignment 7 - CME Seat Price Forecast  - Nicholas Petr"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+### Import Required Packages
+
+```{r}
+# Import Required packages 
+library(forecast)
+library(tseries)
+library(lubridate)
+library(lmtest)
+library(TSA)
+library(arfima)
+library(car)
+library(dplyr)
+library(ggplot2)
+library(zoo)
+library(anytime)
+library(fGarch)
+library(xts)
+library(Metrics)
+```
+
+### Load Data
+
+```{r}
+cmeSP <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week6_multi-step_forecasting/cmeS.csv")
+immSP <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week6_multi-step_forecasting/immS.csv")
+iomSP <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week6_multi-step_forecasting/iomS.csv")
+
+df_vol <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week7_intervention_arimaxForecast/Contracts_Volume.csv")
+df_Class <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week7_intervention_arimaxForecast/Contracts_Classification.csv")
+```
+
+## You need to write a program, one program should work for all 3 badge types:
+
+### The following program Converts Date field to month/year date, calculates the Floor volume, Aggregates the data for each Commodity Indicator for each month, Sorts out of the volume data, those commodities that are relevant for the particular badge (CME, IMM, IOM), Groups by Date, sum all commodity types for volume 
+```{r}
+# Convert Date field to month/year date
+df_vol$Date = mdy(df_vol$Date)
+df_vol$Date = as.Date(as.yearmon(df_vol$Date, "%m/%Y"))
+
+# calculate the Floor volume
+df_vol$Electronic.Volume = as.numeric(gsub(",", "", df_vol$Electronic.Volume)) # Convert Electronic volume to numeric
+df_vol$Floor.Volume = df_vol$Total.Volume-df_vol$Electronic.Volume
+
+# Aggregate the data for each Commodity Indicator for each month. Don't worry about futures / options, just add them all up.
+df = merge(x = df_vol, y = df_Class, by.x = "Commodity.Indicator", by.y = "Commodity.Code", all.x = TRUE)
+# Drop unnecessary columns 
+df = df[ -c(3:4) ]
+# Group by Commodity Indicator, Date, Division and sum the numeric volume columns 
+df = df %>% dplyr::group_by(Commodity.Indicator, Date, Division) %>% summarize_all(sum)
+
+# Sort out of the volume data, those commodities that are relevant for the particular badge (CME, IMM, IOM). Keep in mind that the CME can trade EVERYTHING, not just what the list says.
+s = split(df, df$Division)
+# Separate by Division, drop the division indicator 
+# CME
+cme = s$CME
+cme = cme[ -c(3) ]
+# IMM
+imm = s$IMM
+imm = imm[ -c(3) ]
+#IOM
+iom = s$IOM
+iom = iom[ -c(3) ]
+
+# Groups by Date, sum all commodity types for volume 
+cme <-
+  cme %>%
+  group_by(Date) %>%
+  summarise(Electronic.Volume=sum(Electronic.Volume),
+            Total.Volume=sum(Total.Volume),
+            Floor.Volume=sum(Floor.Volume))
+cme
+
+imm <-
+  imm %>%
+  group_by(Date) %>%
+  summarise(Electronic.Volume=sum(Electronic.Volume),
+            Total.Volume=sum(Total.Volume),
+            Floor.Volume=sum(Floor.Volume))
+imm
+
+iom <-
+  iom %>%
+  group_by(Date) %>%
+  summarise(Electronic.Volume=sum(Electronic.Volume),
+            Total.Volume=sum(Total.Volume),
+            Floor.Volume=sum(Floor.Volume))
+iom
+```
+
+### Develop Process that interpolates a price for each month for each unique dataset
+```{r}
+interp = function(df, int_df){
+  # manipulation prior to interpolation
+  df$DateOfSale = mdy(df$DateOfSale)
+  df$date = as.Date(as.yearmon(df$DateOfSale, "%m/%Y"))
+  m = seq(df$date[1], tail(df$date,1), by="month")
+  
+  # interpolation
+  df = subset(df, select = c("date", "price"))
+  int_df = data.frame(date=m, int_df=spline(df, method="fmm", xout=m)$y)
+  return(int_df)
+}
+cmeSP = interp(cmeSP, int_cme)
+immSP = interp(immSP, int_imm)
+iomSP = interp(iomSP, int_iom)
+```
+
+### Merge interpolated seat prices with volume dataset, Split into Train/Test sets for modeling, Get log values for fGarch. Display CME training set to display output
+```{r}
+# Merge interpolated seat prices with volume dataset 
+cme = merge(x = cme, y = cmeSP, by.x = "Date", by.y = "date")
+imm = merge(x = imm, y = immSP, by.x = "Date", by.y = "date")
+iom = merge(x = iom, y = iomSP, by.x = "Date", by.y = "date")
+
+
+# Split into Train/Test sets for modeling 
+cme_test <- dplyr::filter(cme, Date >= '2013-01-01')
+imm_test <- dplyr::filter(imm, Date >= '2013-01-01')
+iom_test <- dplyr::filter(iom, Date >= '2013-01-01')
+
+cme_train <- dplyr::filter(cme, Date < '2013-01-01')
+imm_train <- dplyr::filter(imm, Date < '2013-01-01')
+iom_train <- dplyr::filter(iom, Date < '2013-01-01')
+
+# Get log values for fGarch
+cme_seat_price_xts <- xts(cme_train$int_df, order.by = as.Date(cme_train$Date, "%m/%d/%Y"))
+cme_log <- log(cme_seat_price_xts)
+cme_log <- diff(cme_log)[-1]
+
+imm_seat_price_xts <- xts(imm_train$int_df, order.by = as.Date(imm_train$Date, "%m/%d/%Y"))
+imm_log <- log(imm_seat_price_xts)
+imm_log <- diff(imm_log)[-1]
+
+iom_seat_price_xts <- xts(iom_train$int_df, order.by = as.Date(iom_train$Date, "%m/%d/%Y"))
+iom_log <- log(iom_seat_price_xts)
+iom_log <- diff(iom_log)[-1]
+
+cme_train # Example 
+```
+
+## TASK A: Use the trading volume information to forecast the monthly seat price for 2013.
+
+### 1. Linear regression (seat price is dependent, volume(s) independent)
+```{r}
+fit1_cme <- lm(int_df ~ Total.Volume, data=cme_train) # cme 
+summary(fit1_cme)
+fit1_imm <- lm(int_df ~ Floor.Volume, data=imm_train) # imm
+summary(fit1_imm)
+fit1_iom <- lm(int_df ~ Floor.Volume, data=iom_train) # iom
+summary(fit1_iom)
+```
+
+### 2. Linear regression with ARMA errors (use arima with xreg) 
+```{r}
+fit2_cme <- auto.arima(cme_train$int_df, xreg=cme_train$Total.Volume)
+summary(fit2_cme)
+fit2_imm <- auto.arima(imm_train$int_df, xreg=imm_train$Floor.Volume)
+summary(fit2_imm)
+fit2_iom <- auto.arima(iom_train$int_df, xreg=iom_train$Floor.Volume)
+summary(fit2_iom)
+```
+
+### 3. Holt Winters
+```{r}
+fit3_cme <- HoltWinters(ts(cme_train$int_df, frequency = 12))
+summary(fit3_cme)
+fit3_imm <- HoltWinters(ts(imm_train$int_df, frequency = 12))
+summary(fit3_imm)
+fit3_iom <- HoltWinters(ts(iom_train$int_df, frequency = 12))
+summary(fit3_iom)
+```
+
+### 4. ARIMA
+```{r}
+fit4_cme <- auto.arima(ts(cme_train$int_df, frequency = 12), seasonal = FALSE)
+summary(fit4_cme)
+fit4_imm <- auto.arima(ts(imm_train$int_df, frequency = 12), seasonal = FALSE)
+summary(fit4_imm)
+fit4_iom <- auto.arima(ts(iom_train$int_df, frequency = 12), seasonal = FALSE)
+summary(fit4_iom)
+```
+
+### 5. Seasonal ARIMA (SARIMA) - here seasonality is monthly
+```{r}
+fit5_cme <- auto.arima(ts(cme_train$int_df, frequency = 12), D=1)
+summary(fit5_cme)
+fit5_imm <- auto.arima(ts(imm_train$int_df, frequency = 12), D=1)
+summary(fit5_imm)
+fit5_iom <- auto.arima(ts(iom_train$int_df, frequency = 12), D=1)
+summary(fit5_iom)
+```
+
+### 6. Fractional ARIMA (ARFIMA) - check applicability first using the ACF
+```{r}
+acf(ts(cme_train$int_df, frequency = 12))
+cme_d <- fracdiff::fracdiff(ts(cme_train$int_df, frequency = 12)) #get the fractional d
+cme_d # We can use ARFIMA, as d is .499 (not > .5)
+fit6_cme <- forecast::arfima(ts(cme_train$int_df, frequency = 12))
+summary(fit6_cme)
+
+acf(ts(imm_train$int_df))
+imm_d <- fracdiff::fracdiff(ts(imm_train$int_df, frequency = 12)) #get the fractional d
+imm_d # We can use ARFIMA, as d is .499 (not > .5)
+fit6_imm <- forecast::arfima(ts(imm_train$int_df, frequency = 12))
+summary(fit6_imm)
+
+acf(ts(iom_train$int_df))
+iom_d <- fracdiff::fracdiff(ts(iom_train$int_df, frequency = 12)) #get the fractional d
+iom_d # We can use ARFIMA, as d is .499 (not > .5)
+fit6_iom <- forecast::arfima(ts(iom_train$int_df, frequency = 12))
+summary(fit6_iom)
+```
+
+### 7. ARMA and GARCH combination - use the fGarch R library and garchFit()
+```{r}
+# find p,q
+cme_arma <- auto.arima(cme_log)
+summary(cme_arma)
+# input p,q into arma for garch fit
+fit7_cme <- garchFit(~arma(0,0) + garch(1,1), data=cme_log, cond.dist = "std", trace=F)
+summary(fit7_cme)
+
+# find p,q
+imm_arma <- auto.arima(imm_log)
+summary(imm_arma)
+# input p,q into arma for garch fit
+fit7_imm <- garchFit(~arma(0,2) + garch(1,1), data=imm_log, cond.dist = "std", trace=F)
+summary(fit7_imm)
+
+# find p,q
+iom_arma <- auto.arima(iom_log)
+summary(iom_arma)
+# input p,q into arma for garch fit
+fit7_iom <- garchFit(~arma(0,1) + garch(1,1), data=iom_log, cond.dist = "std", trace=F)
+summary(fit7_iom)
+```
+
+### Part B: Since you already have the seat prices for the 2013, evaluate each algorithm from Task A using sMAPE. Which one do you recommend to forecast monthly prices for each of the seat classes?
+
+### 1. Linear regression (seat price is dependent, volume(s) independent)
+```{r}
+cme_fit1_forecast <- predict(fit1_cme, newdata=cme_test)
+cme_test$linear_regression <- cme_fit1_forecast
+cme_test$linear_regression
+
+imm_fit1_forecast <- predict(fit1_imm, newdata=imm_test)
+imm_test$linear_regression <- imm_fit1_forecast
+imm_test$linear_regression
+
+iom_fit1_forecast <- predict(fit1_iom, newdata=iom_test)
+iom_test$linear_regression <- iom_fit1_forecast
+iom_test$linear_regression
+```
+
+### 2. Linear regression with ARMA errors (use arima with xreg) 
+```{r}
+cme_fit2_forecast <- predict(fit2_cme, newxreg=cme_test$Floor.Volume)$pred
+cme_test$lm_with_arima_errors <- cme_fit2_forecast
+cme_test$lm_with_arima_errors
+
+imm_fit2_forecast <- predict(fit2_imm, newxreg=imm_test$Floor.Volume)$pred
+imm_test$lm_with_arima_errors <- imm_fit2_forecast
+imm_test$lm_with_arima_errors
+
+iom_fit2_forecast <- predict(fit2_iom, newxreg=iom_test$Floor.Volume)$pred
+iom_test$lm_with_arima_errors <- iom_fit2_forecast
+iom_test$lm_with_arima_errors
+```
+
+### 3. Holt Winters
+```{r}
+cme_fit3_forecast <- forecast(fit3_cme, h=12)$mean
+cme_test$holt_winters <- cme_fit3_forecast
+cme_test$holt_winters
+
+imm_fit3_forecast <- forecast(fit3_imm, h=12)$mean
+imm_test$holt_winters <- imm_fit3_forecast
+imm_test$holt_winters
+
+iom_fit3_forecast <- forecast(fit3_iom, h=12)$mean
+iom_test$holt_winters <- iom_fit3_forecast
+iom_test$holt_winters
+```
+
+### 4. ARIMA
+```{r}
+cme_fit4_forecast <- forecast(fit4_cme, h=12)$mean
+cme_test$arima <- cme_fit4_forecast
+cme_test$arima
+
+imm_fit4_forecast <- forecast(fit4_imm, h=12)$mean
+imm_test$arima <- imm_fit4_forecast
+imm_test$arima
+
+iom_fit4_forecast <- forecast(fit4_iom, h=12)$mean
+iom_test$arima <- iom_fit4_forecast
+iom_test$arima
+```
+
+### 5. Seasonal ARIMA (SARIMA) - here seasonality is monthly
+```{r}
+cme_fit5_forecast <- forecast(fit5_cme, h=12)$mean
+cme_test$sarima <- cme_fit5_forecast
+cme_test$sarima
+
+imm_fit5_forecast <- forecast(fit5_imm, h=12)$mean
+imm_test$sarima <- imm_fit5_forecast
+imm_test$sarima
+
+iom_fit5_forecast <- forecast(fit5_iom, h=12)$mean
+iom_test$sarima <- iom_fit5_forecast
+iom_test$sarima
+```
+
+### 6. Fractional ARIMA (ARFIMA) - check applicability first using the ACF
+```{r}
+cme_fit6_forecast <- forecast(fit6_cme, h=12)$mean
+cme_test$arfima <- cme_fit6_forecast
+cme_test$arfima
+
+imm_fit6_forecast <- forecast(fit6_imm, h=12)$mean
+imm_test$arfima <- imm_fit6_forecast
+imm_test$arfima
+
+iom_fit6_forecast <- forecast(fit6_iom, h=12)$mean
+iom_test$arfima <- iom_fit6_forecast
+iom_test$arfima
+```
+
+### 7. ARMA and GARCH combination - use the fGarch R library and garchFit()
+```{r}
+cme_fit7_forecast <- predict(fit7_cme, n.ahead=12)$meanForecast
+cme_test$garch <- cme_fit7_forecast
+cme_test$garch
+
+imm_fit7_forecast <- predict(fit7_imm, n.ahead=12)$meanForecast
+imm_test$garch <- imm_fit7_forecast
+imm_test$garch
+
+iom_fit7_forecast <- predict(fit7_iom, n.ahead=12)$meanForecast
+iom_test$garch <- iom_fit7_forecast
+iom_test$garch
+```
+
+### Calculate modeling outputs using sMAPE
+```{r}
+smape_results <- data.frame(
+  row.names = c('CME', 'IMM', 'IOM'),
+  linear_regression = c(smape(iom_test$Floor.Volume, iom_test$linear_regression),
+                        smape(imm_test$Floor.Volume, imm_test$linear_regression), 
+                        smape(cme_test$Floor.Volume, cme_test$linear_regression)),
+  linear_regression_with_arima_errors = c(smape(iom_test$Floor.Volume, iom_test$lm_with_arima_errors), 
+                                          smape(imm_test$Floor.Volume, imm_test$lm_with_arima_errors), 
+                                          smape(cme_test$Floor.Volume,        cme_test$lm_with_arima_errors)), 
+  holt_winters = c(smape(iom_test$Floor.Volume, iom_test$holt_winters),
+                   smape(imm_test$Floor.Volume, imm_test$holt_winters), 
+                   smape(cme_test$Floor.Volume, cme_test$holt_winters)),
+  arima = c(smape(iom_test$Floor.Volume, iom_test$arima),
+            smape(imm_test$Floor.Volume, imm_test$arima), 
+            smape(cme_test$Floor.Volume, cme_test$arima)),
+  sarima = c(smape(iom_test$Floor.Volume, iom_test$sarima),
+             smape(imm_test$Floor.Volume, imm_test$sarima), 
+             smape(cme_test$Floor.Volume, cme_test$sarima)),
+  arfima = c(smape(iom_test$Floor.Volume, iom_test$arfima),
+             smape(imm_test$Floor.Volume, imm_test$arfima), 
+             smape(cme_test$Floor.Volume, cme_test$arfima)),
+  garch = c(smape(iom_test$Floor.Volume, iom_test$garch),
+             smape(imm_test$Floor.Volume, imm_test$garch), 
+             smape(cme_test$Floor.Volume, cme_test$garch))
+) 
+
+
+smape_results
+```
+
+### Which one do you recommend to forecast monthly prices for each of the seat classes?
+
+Looking at the table outputs you would use ARFIMA for CME seat prices, ARFIMA for IMM prices, and SARIMA for IOM prices.

@@ -1,0 +1,199 @@
+---
+title: "Assignment 6 - Multi-step Forecasting & Uniform TS - Nicholas Petr"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+### Import Required Packages
+
+```{r}
+# Import Required packages 
+library(forecast)
+library(tseries)
+library(lubridate)
+library(lmtest)
+library(TSA)
+library(arfima)
+library(car)
+library(dplyr)
+library(ggplot2)
+library(zoo)
+library(anytime)
+```
+
+### Load Data -- Split into Train/Test
+
+```{r}
+data(beersales)
+
+test <- window(beersales, start = 1990)
+test
+
+train = window(beersales, 1975, c(1989,12))
+train
+```
+
+## Standard auto.arima prior to 1 
+
+### Data appears to include trend and additive seasonality 
+```{r}
+ts.plot(beersales)
+```
+
+### Lag moving up and down at the same time. Dataset looks to be autocorrelated 
+```{r}
+acf(beersales) 
+```
+
+### Apply seasonal and trend differencing. We see, by doing this, we get a plot more closely resembling white noise
+```{r}
+ts.plot(diff(diff(beersales, 12)))
+```
+
+## Questions:
+
+## Part 1 - use ARIMA(p,d,q) model to forecast beer sales for all months of 1990 using the following two multi-step forecasting approaches. 
+## For each model, check mean, autocorrelation and normality of the residuals. Confirm if the residuals are white noise.
+
+### 1A - Use the h-period in forecast() to forecast each month of 1990. 
+### This is also known as recursive forecasting where you fit a model only once and use it recursively for h-periods.
+
+### Run auto.arima to output ARIMA numbers 
+```{r}
+a <- auto.arima(train) # As we can see from the outputs, d=1 and D=1, indicating both trend and seasonality 
+summary(a)
+# Apply forecast and plot findings 
+a_forecast = forecast(a, h = 12)
+plot(forecast(a, h = 12))
+```
+
+### Check the mean of residuals: The mean of residuals for 1A is relatively close to 0
+```{r}
+mean(a$residuals)
+```
+
+### Check the autocorrelation of residuals of 1A. This is done using the checkresiduals command within forecast. p-value is greater than 0.05, meaning residuals are independent (we are not experiencing autocorrelation)
+```{r}
+checkresiduals(a)
+```
+
+### Check the normality of residuals of 1A via Shapiro-Wilk Test. p-value is less than 0.05, meaning data is not normally distributed 
+```{r}
+shapiro.test(a$residuals)
+```
+
+## 1B - Use the monthly data as a continuous time series. Forecast for 1990 Jan, Plug forecast into the time series, build a new model to forecast for 1990 Feb. And so on and so forth. In other words, h=1 in all the forecasts. This is known as direct recursive (DirRec) forecasting where you fit a new model for each time step.
+```{r}
+curr_train <- train
+preds <- c()
+model_list <- list()
+for(i in 1:12) {
+  curr_model <- auto.arima(curr_train)
+  model_list[[i]] <- curr_model
+  point <- forecast(curr_model, h=1)$mean
+  preds  <- c(preds, point)
+  curr_train   <- ts(c(curr_train, point), start=1975, frequency=12)
+}
+
+# Output model to be used for plotting purposes 
+b_forecast = model_list[[12]]$fitted
+b_forecast <- window(b_forecast, start = 1990)
+```
+
+## 1C - Plot the mean, the p-value of the autocorrelation test and the p-value of the normality test of the residuals of the 12 models.
+
+### Plot the mean
+```{r}
+# Plot of the mean 
+mean_plot = array(numeric())
+for(i in 1:12) {
+  mean_plot[[i]] <- c(mean(model_list[[i]]$residuals))
+}
+plot(mean_plot)
+```
+
+### Plot of the p-value of the autocorrelation test
+```{r}
+ac_plot = array(numeric())
+for(i in 1:12) {
+  ac_plot[[i]] <- c(durbinWatsonTest(as.vector(model_list[[i]]$residuals)))
+}
+plot(ac_plot)
+```
+
+### Plot of the p-value of the normality test
+```{r}
+stest = c()
+norm_plot = array(numeric())
+for(i in 1:12) {
+  stest[[i]] <- shapiro.test(model_list[[i]]$residuals)
+  norm_plot[[i]] = c(stest[[i]]$p.value)
+}
+plot(norm_plot)
+```
+
+## 2 - Plot the Recursive and DirRec along with the actuals. Use ylim=c(12.5, 17) to get a good visual of the plot differences
+```{r}
+autoplot(train, main="Recursive and DirRec along with the actuals", ylim=c(12, 17.5)) +
+  autolayer(test, series = "Actuals", alpha = 0.5) +
+  autolayer(a_forecast, series = "1A", alpha = 0.5) +
+  autolayer(b_forecast, series = "1B", alpha = 0.5) +
+  guides(colour = guide_legend("Model"))
+```
+
+## 3 - Calculate the MSE for 1990 - which of the two approaches take larger computation time and why?
+
+We can see that the MSE is slightly better for 1B (DirRec) than it is for 1A (Recursive). I did not see a discernable difference in computation time, however the actual forecast for DirRec (1B) took a longer time due to it needing to run 12 individual models. 
+```{r}
+# 1A MSE for 1990
+sqrt(mean((test - as.numeric(a_forecast$mean))^2))
+# 1B MSE for 1990
+sqrt(mean((test - b_forecast)^2))
+```
+
+## Part 2 
+
+## Load Data
+```{r}
+cme <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week6_multi-step_forecasting/cmeS.csv")
+imm <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week6_multi-step_forecasting/immS.csv")
+iom <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week6_multi-step_forecasting/iomS.csv")
+```
+
+## Develop Process for interpolates a price for each month for each unique dataset
+```{r}
+interp = function(df, int_df, df_plot, pltTitle){
+  # manipulation prior to interpolation
+  df$DateOfSale = mdy(df$DateOfSale)
+  df$date = as.Date(as.yearmon(df$DateOfSale, "%m/%Y"))
+  m = seq(df$date[1], tail(df$date,1), by="month")
+  
+  # interpolation
+  df = subset(df, select = c("date", "price"))
+  int_df = data.frame(date=m, int_df=spline(df, method="fmm", xout=m)$y)
+  
+  # include for plotting purposes 
+  df_plot = merge(df, int_df, by="date", all=TRUE)
+  df_plot$null.value = ifelse(is.na(df_plot['price']), 'TRUE', 'FALSE')
+  # plot
+  plot(df_plot[,c(1,3)],col=ifelse(df_plot[,'null.value']==TRUE, 'red','black'),type = "b", main=pltTitle)
+}
+```
+
+### Run Function and return results 
+```{r}
+# Run Function and return results 
+par(mfrow=c(3,1))
+interp(cme, int_cme, cme_plot, "CME Seat Pricing")
+interp(imm, int_imm, imm_plot, "IMM Seat Pricing")
+interp(iom, int_iom, iom_plot, "IOM Seat Pricing")
+```
+
+### How the function works, and what the results are:
+
+I decided to use spline, which returns a list containing components x and y which give the ordinates where interpolation took place and the interpolated values. I decided on this method because the instructions call for identifying where interpolation took place, which spline quickly identifies. As you can see, the outputs for the three graphics are relatively similar in their plot shape, with CME having more interpolated values than the IMM and IOM. 

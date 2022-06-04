@@ -1,0 +1,137 @@
+---
+title: "Assignment 4 - Traffic Flow - Nicholas Petr"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+### Import Required Packages
+
+```{r}
+# Import required packages
+library(forecast)
+library(tseries)
+library(lubridate)
+library(lmtest)
+library(TSA)
+```
+
+### Load Data, Isolate the traffic column for TS conversion, convert to a time series, plot for review  
+
+```{r}
+train <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week4_arima_cont/trafficTrain2.csv")
+test <- read.csv("C:/Users/Nick's Laptop/Desktop/Time Series Analysis/week4_arima_cont/trafficTest1.csv")
+
+# Isolate traffic column 
+trafficTrain = train$Traffic
+trafficTest = test$Traffic
+
+# Convert dataframe to TS. We will use frequency = 24 because we are looking at hourly data
+train = ts(trafficTrain, frequency = 24)
+test= ts(trafficTest)
+
+# Plot train TS for review. The plot indicates there is no associated trend or seasonality  
+ts.plot(train)
+```
+
+## Questions
+
+## Part 1 - Use Arima(p,d,q) model to forecast. 
+
+### 1.1 Find the model returned by R auto.arima().
+### 1.2 Change the values of p and q and determine the best model using AICc and BIC. 
+### 1.3 Do AICc and BIC select the same model as the best model?
+
+### 1.1 Find the model returned by R auto.arima(): The output for auto.arima is ARIMA(2,0,3) 
+```{r}
+model<-auto.arima(train, seasonal = FALSE)
+summary(model)
+model$aicc
+model$bic
+```
+
+### 1.2 Change the values of p and q and determine the best model using AICc and BIC.  
+
+### Model1: Adjust p by 1. This outputs worse BIC and AICc
+```{r}
+model1 = Arima(train, order = c(3,0,3))
+model1$aicc
+model1$bic
+```
+
+### Model2: Adjust q by 1. This gives better BIC but worse AICc 
+```{r}
+model2 = Arima(train, order = c(2,0,2))
+model2$aicc
+model2$bic
+```
+
+### 1.3 Do AICc and BIC select the same model as the best model?
+The auto.arima model outputs the best AICc score. However, the model where we adjust q by 1: Arima(train, order = c(2,0,2)) outputs the best BIC score
+
+## Part 2 - Use day of the week seasonal ARIMA(p,d,q)(P,D,Q)s model to forecast for July 1 (which is a Monday) - note use the hourly data
+
+### Update time series to apply hourly data and run a summary 
+```{r}
+# 24 * 7 = 168, which is what we will use for our frequency to get hourly data 
+hourly = ts(train, frequency = 168)
+daily = auto.arima(hourly, seasonal = TRUE)
+summary(daily)
+```
+
+### Run forecast for the updated TS and plot, including a check of the residuals 
+```{r}
+fit1 = forecast(daily, h=168)
+plot(fit1)
+checkresiduals(fit1)
+```
+
+## Part 3 - Use hour of the day seasonal ARIMA (p,d,q)(P,D,Q)s model to forecast for the hours 8:00, 9:00, 17:00 and 18:00 on July 1
+
+### 3.1 By applying Box-Cox, we can check for a suitable transformation to utilize in our forecast
+```{r}
+lambda <- BoxCox.lambda(train)
+train.fit.arima.boxcox <- auto.arima(train, lambda=lambda, seasonal = TRUE) # Using Box-Cox transformation
+summary(train.fit.arima.boxcox) # We can see here that we get better AICc and BIC results than identified in Part 1
+```
+
+### Forecast the TS and check residuals plot 
+```{r}
+fit2 = forecast(train.fit.arima.boxcox, h=24)
+plot(fit2)
+checkresiduals(fit2)
+```
+
+### 3.2 Provide forecast for the hours 8:00, 9:00, 17:00 and 18:00 on July 1
+```{r}
+fit2$mean[c(8, 9, 17, 18)]
+```
+
+## Part 4 - For the July 1 8:00, 9:00, 17:00 and 18:00 forecasts, which model is better (part 2 or part 3) ?
+Looking at the differences between the actual outputs and the forecasted outputs, we can clearly see that the model from part 2 provides a much better forecast than part 3.
+```{r}
+# Part 2 fit for the specified hours 
+fit1_outputs = fit1$mean[c(8, 9, 17, 18)]
+
+# Part 3 fit for the specified hours 
+fit2_outputs = fit2$mean[c(8, 9, 17, 18)]
+
+# Actual ouputs from test TS
+test_outputs = test[c(8, 9, 17, 18)]
+```
+
+### Part 2 Forecast Difference: 4.08578
+```{r}
+# Check the differences
+sum(test_outputs - fit1_outputs)
+```
+
+### Part 3 Forecast Difference: 779.9843
+```{r}
+# Check the differences
+sum(test_outputs - fit2_outputs)
+```

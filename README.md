@@ -1,4 +1,4 @@
-- 👋 Candidate for Master of Science in Analytics at The University of Chicago; 
+- 👋 Graduate of Master of Science in Analytics Program at The University of Chicago; 
 - Senior Data Analyst/Consultant with 6+ years experience; 
 - Excels at data analysis, mining, warehousing/management; project management; statistical modeling; natural language processing; behavioral analytics; customer experience analytics; BPM/R. Experience in both internal and client-facing capacities
 - 👀 Technical Skills/Languages: Python, R Studio, SQL, MySQL, NoSQL, MongoDB, Tableau, Neo4j, Google Cloud, SAS, XML, JSON, HTML
